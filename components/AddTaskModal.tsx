@@ -10,6 +10,7 @@ import {
   Pressable
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import React from 'react';
 
 const COURSES = ['Mathematics', 'Physics', 'History', 'Literature', 'Chemistry', 'Computer Science'];
 const PRIORITIES = ['high', 'medium', 'low'] as const;

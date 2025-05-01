@@ -55,16 +55,19 @@ export const taskApi = {
 
   toggleTaskCompletion: async (taskId: string): Promise<Task> => {
     try {
+      // Find the task
       const taskIndex = tasks.findIndex(t => t.id === taskId);
       if (taskIndex === -1) {
         throw new Error('Task not found');
       }
       
+      // Update the task's completed status
       tasks[taskIndex] = {
         ...tasks[taskIndex],
         completed: !tasks[taskIndex].completed
       };
       
+      // Return the updated task immediately without artificial delay
       return tasks[taskIndex];
     } catch (error) {
       console.error('Error toggling task:', error);

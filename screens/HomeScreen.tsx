@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme, Animated, Modal } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme, Animated, Modal, Dimensions } from 'react-native';
 import { Plus, ChevronRight, Calendar, Clock, BookOpen, Check, X, AlertTriangle } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, gradients, shadows } from '../theme/colors';
 import { taskApi } from '../services/mockApi';
 import { Task } from '../types';
 import AddTaskModal from '../components/AddTaskModal';
+import TaskCheckbox from '../components/TaskCheckbox';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
@@ -14,6 +15,7 @@ export default function HomeScreen() {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [isViewAllVisible, setIsViewAllVisible] = useState(false);
   const scrollY = new Animated.Value(0);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
   useEffect(() => {
     loadTasks();
@@ -39,27 +41,72 @@ export default function HomeScreen() {
   };
 
   const handleToggleTask = async (taskId: string) => {
-    try {
-      const updatedTask = await taskApi.toggleTaskCompletion(taskId);
-      setTasks(prevTasks => 
-        prevTasks.map(task => 
-          task.id === taskId ? updatedTask : task
-        )
-      );
-    } catch (error) {
-      console.error('Error toggling task:', error);
-    }
+    // Find the task to toggle
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) return;
+    
+    // Get the current task state
+    const taskToToggle = tasks[taskIndex];
+    const newCompletedState = !taskToToggle.completed;
+    
+    // Update UI immediately
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === taskId ? { ...task, completed: newCompletedState } : task
+      )
+    );
+    
+    // Then update the backend (with a slight delay to ensure UI state is visible)
+    setTimeout(async () => {
+      try {
+        await taskApi.toggleTaskCompletion(taskId);
+      } catch (error) {
+        console.error('Error toggling task:', error);
+        // Revert the UI change if the API call fails
+        setTasks(prevTasks => 
+          prevTasks.map(task => 
+            task.id === taskId ? { ...task, completed: !newCompletedState } : task
+          )
+        );
+      }
+    }, 300);
   };
 
   const progress = tasks.length > 0 
     ? (tasks.filter(task => task.completed).length / tasks.length) * 100 
     : 0;
 
-  const todayTasks = tasks.filter(task => {
+  // Get tasks for a specific date
+  const getTasksForDate = (date: Date) => {
+    return tasks.filter(task => {
+      const taskDate = new Date(task.deadline);
+      return taskDate.toDateString() === date.toDateString();
+    });
+  };
+
+  // Get weekly dates
+  const weekDates = useMemo(() => {
+    const dates = [];
     const today = new Date();
-    const taskDate = new Date(task.deadline);
-    return taskDate.toDateString() === today.toDateString();
-  });
+    for (let i = -3; i <= 3; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  }, []);
+
+  const getDayName = (date: Date) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return days[date.getDay()];
+  };
+
+  const isToday = (date: Date) => {
+    const today = new Date();
+    return date.toDateString() === today.toDateString();
+  };
+
+  const todayTasks = getTasksForDate(selectedDate);
 
   const headerHeight = scrollY.interpolate({
     inputRange: [0, 100],
@@ -73,55 +120,101 @@ export default function HomeScreen() {
     extrapolate: 'clamp',
   });
 
-  const renderTaskCard = (task: Task) => (
-    <View key={task.id} style={[styles.taskCard, shadows.small]}>
-      <LinearGradient
-        colors={isDark ? gradients.card.dark : gradients.card.light}
-        style={styles.taskCardContent}
+  // Memoize the renderTaskCard function to improve performance
+  const renderTaskCard = useCallback((task: Task) => {
+    const taskDate = new Date(task.deadline);
+    const timeString = taskDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    // Extract the colors for better type safety
+    const cardColors = isDark ? gradients.card.dark : gradients.card.light;
+    
+    return (
+      <TouchableOpacity 
+        key={task.id} 
+        activeOpacity={0.8}
+        style={[styles.taskCard, shadows.medium]}
+        onPress={() => handleToggleTask(task.id)}
       >
-        <TouchableOpacity 
-          style={[
-            styles.checkbox,
-            task.completed && styles.checkboxCompleted,
-            { borderColor: isDark ? colors.primary : colors.primary }
-          ]}
-          onPress={() => handleToggleTask(task.id)}
+        <LinearGradient
+          colors={[cardColors[0], cardColors[1]]}
+          style={styles.taskCardContent}
+          start={{x: 0, y: 0}}
+          end={{x: 1, y: 1}}
         >
-          {task.completed && <Check size={16} color={isDark ? colors.background.dark : colors.background.light} />}
-        </TouchableOpacity>
-        <View style={styles.taskInfo}>
-          <Text style={[
-            styles.taskTitle,
-            { color: isDark ? colors.text.light : colors.text.primary },
-            task.completed && styles.completedTask
+          <View style={[
+            styles.taskCardInner,
+            { 
+              backgroundColor: isDark ? 'rgba(31, 41, 55, 0.5)' : 'rgba(255, 255, 255, 0.7)',
+              borderLeftWidth: 4,
+              borderLeftColor: task.completed ? colors.success : colors.primary
+            }
           ]}>
-            {task.title}
-          </Text>
-          <Text style={[styles.taskSubject, { color: isDark ? colors.text.light : colors.text.secondary }]}>
-            {task.subject}
-          </Text>
-        </View>
-        <View style={[
-          styles.priorityContainer,
-          { backgroundColor: getPriorityBackgroundColor(task.priority) }
-        ]}>
-          {task.priority === 'high' && <AlertTriangle size={16} color={colors.danger} />}
-          <Text style={[
-            styles.priorityText,
-            { color: getPriorityTextColor(task.priority) }
-          ]}>
-            {task.priority.toUpperCase()}
-          </Text>
-        </View>
-      </LinearGradient>
-    </View>
-  );
+            <View style={styles.taskCardHeader}>
+              <View style={styles.checkboxContainer}>
+                <TaskCheckbox 
+                  completed={task.completed}
+                  onToggle={() => handleToggleTask(task.id)}
+                />
+              </View>
+              <View style={styles.taskInfo}>
+                <Text 
+                  style={[
+                    styles.taskTitle,
+                    { color: isDark ? colors.text.light : colors.text.primary },
+                    task.completed && styles.completedTask
+                  ]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {task.title}
+                </Text>
+                <View style={styles.taskMeta}>
+                  <View style={[
+                    styles.subjectContainer,
+                    { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.3)' : 'rgba(229, 231, 235, 0.6)' }
+                  ]}>
+                    <Text 
+                      style={[styles.taskSubject, { color: isDark ? colors.text.light : colors.text.secondary }]}
+                      numberOfLines={1}
+                    >
+                      {task.subject}
+                    </Text>
+                  </View>
+                  <View style={styles.timeContainer}>
+                    <Clock size={12} color={colors.accent} style={styles.timeIcon} />
+                    <Text style={styles.taskDeadline}>
+                      {timeString}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            <View style={[
+              styles.priorityContainer,
+              { backgroundColor: getPriorityBackgroundColor(task.priority) }
+            ]}>
+              {task.priority === 'high' && <AlertTriangle size={14} color={colors.danger} />}
+              <Text style={[
+                styles.priorityText,
+                { color: getPriorityTextColor(task.priority) }
+              ]}>
+                {task.priority.toUpperCase()}
+              </Text>
+            </View>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    );
+  }, [isDark, handleToggleTask]);
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? colors.background.dark : colors.background.light }]}>
       <Animated.View style={[styles.header, { height: headerHeight, opacity: headerOpacity }]}>
         <LinearGradient
-          colors={isDark ? gradients.background.dark : gradients.background.light}
+          colors={[
+            (isDark ? gradients.background.dark : gradients.background.light)[0],
+            (isDark ? gradients.background.dark : gradients.background.light)[1]
+          ]}
           style={styles.headerGradient}
         >
           <View style={styles.headerContent}>
@@ -146,23 +239,47 @@ export default function HomeScreen() {
         {/* Progress Section */}
         <View style={styles.progressSection}>
           <LinearGradient
-            colors={isDark ? gradients.card.dark : gradients.card.light}
+            colors={[
+              (isDark ? gradients.card.dark : gradients.card.light)[0],
+              (isDark ? gradients.card.dark : gradients.card.light)[1]
+            ]}
             style={[styles.progressCard, shadows.medium]}
+            start={{x: 0, y: 0}}
+            end={{x: 1, y: 1}}
           >
             <View style={styles.progressHeader}>
               <Text style={[styles.sectionTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
                 Today's Progress
               </Text>
-              <Text style={[styles.progressPercentage, { color: isDark ? colors.text.light : colors.text.primary }]}>
-                {Math.round(progress)}%
-              </Text>
+              <View style={styles.progressBadge}>
+                <Text style={[styles.progressPercentage, { color: '#fff' }]}>
+                  {Math.round(progress)}%
+                </Text>
+              </View>
             </View>
             <View style={styles.progressBarContainer}>
-              <View style={[styles.progressBar, { width: `${progress}%` }]} />
+              <View 
+                style={[
+                  styles.progressBarBackground, 
+                  { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }
+                ]}
+              />
+              <View 
+                style={[
+                  styles.progressBar, 
+                  { 
+                    width: `${progress}%`,
+                    backgroundColor: getProgressColor(progress)
+                  }
+                ]} 
+              />
             </View>
             <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
-                <Calendar size={20} color={isDark ? colors.text.light : colors.text.secondary} />
+              <View style={[
+                styles.statItem, 
+                { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(99, 102, 241, 0.05)' }
+              ]}>
+                <Calendar size={20} color={isDark ? colors.text.light : colors.primary} />
                 <Text style={[styles.statValue, { color: isDark ? colors.text.light : colors.text.primary }]}>
                   {tasks.length}
                 </Text>
@@ -170,8 +287,11 @@ export default function HomeScreen() {
                   Tasks
                 </Text>
               </View>
-              <View style={styles.statItem}>
-                <Clock size={20} color={isDark ? colors.text.light : colors.text.secondary} />
+              <View style={[
+                styles.statItem,
+                { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(99, 102, 241, 0.05)' }
+              ]}>
+                <Clock size={20} color={isDark ? colors.text.light : colors.primary} />
                 <Text style={[styles.statValue, { color: isDark ? colors.text.light : colors.text.primary }]}>
                   {tasks.filter(t => t.completed).length}
                 </Text>
@@ -179,8 +299,11 @@ export default function HomeScreen() {
                   Completed
                 </Text>
               </View>
-              <View style={styles.statItem}>
-                <BookOpen size={20} color={isDark ? colors.text.light : colors.text.secondary} />
+              <View style={[
+                styles.statItem,
+                { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(99, 102, 241, 0.05)' }
+              ]}>
+                <BookOpen size={20} color={isDark ? colors.text.light : colors.primary} />
                 <Text style={[styles.statValue, { color: isDark ? colors.text.light : colors.text.primary }]}>
                   {new Set(tasks.map(t => t.subject)).size}
                 </Text>
@@ -192,12 +315,97 @@ export default function HomeScreen() {
           </LinearGradient>
         </View>
 
+        {/* Weekly Calendar */}
+        <View style={styles.calendarSection}>
+          <View style={styles.sectionHeaderWithIcon}>
+            <Calendar size={20} color={isDark ? colors.text.light : colors.primary} style={{marginRight: 8}} />
+            <Text style={[styles.sectionTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
+              Weekly Schedule
+            </Text>
+          </View>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.weeklyCalendarContainer}
+          >
+            {weekDates.map((date) => {
+              const dateTasksCount = getTasksForDate(date).length;
+              const isSelected = date.toDateString() === selectedDate.toDateString();
+              const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              
+              return (
+                <TouchableOpacity
+                  key={date.toISOString()}
+                  style={[
+                    styles.dateContainer,
+                    isToday(date) && styles.todayContainer,
+                    isSelected && styles.selectedDateContainer,
+                    shadows.medium
+                  ]}
+                  onPress={() => setSelectedDate(date)}
+                  activeOpacity={0.7}
+                >
+                  <LinearGradient
+                    colors={
+                      isSelected
+                        ? [gradients.primary[0], gradients.primary[1]]
+                        : isToday(date)
+                          ? [gradients.accent[0], gradients.accent[1]]
+                          : [
+                              (isDark ? gradients.card.dark : gradients.card.light)[0],
+                              (isDark ? gradients.card.dark : gradients.card.light)[1]
+                            ]
+                    }
+                    style={styles.dateGradient}
+                    start={{x: 0, y: 0}}
+                    end={{x: 0, y: 1}}
+                  >
+                    <Text style={[
+                      styles.dayName,
+                      { color: isSelected || isToday(date) ? '#fff' : isDark ? colors.text.light : colors.text.primary }
+                    ]}>
+                      {getDayName(date)}
+                    </Text>
+                    <Text style={[
+                      styles.dayNumber,
+                      { color: isSelected || isToday(date) ? '#fff' : isDark ? colors.text.light : colors.text.primary }
+                    ]}>
+                      {date.getDate()}
+                    </Text>
+                    <Text style={[
+                      styles.monthLabel,
+                      { color: isSelected || isToday(date) ? 'rgba(255, 255, 255, 0.8)' : isDark ? colors.text.secondary : colors.text.secondary }
+                    ]}>
+                      {date.toLocaleDateString('en-US', { month: 'short' })}
+                    </Text>
+                    {dateTasksCount > 0 && (
+                      <View style={[
+                        styles.taskIndicator,
+                        { backgroundColor: isSelected || isToday(date) ? '#fff' : colors.primary }
+                      ]}>
+                        <Text style={[
+                          styles.taskCount,
+                          { color: isSelected || isToday(date) ? colors.primary : '#fff' }
+                        ]}>
+                          {dateTasksCount}
+                        </Text>
+                      </View>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         {/* Tasks Section */}
         <View style={styles.tasksSection}>
-          <View style={styles.sectionHeader}>
+          <View style={styles.sectionHeaderWithIcon}>
+            <Check size={20} color={isDark ? colors.text.light : colors.primary} style={{marginRight: 8}} />
             <Text style={[styles.sectionTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
-              Today's Tasks
+              {isToday(selectedDate) ? "Today's Tasks" : `Tasks for ${selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
             </Text>
+            <View style={{flex: 1}} />
             <TouchableOpacity 
               style={styles.viewAllButton}
               onPress={() => setIsViewAllVisible(true)}
@@ -210,11 +418,13 @@ export default function HomeScreen() {
           {todayTasks.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={[styles.emptyStateText, { color: isDark ? colors.text.light : colors.text.secondary }]}>
-                No tasks for today
+                No tasks for {isToday(selectedDate) ? "today" : selectedDate.toLocaleDateString()}
               </Text>
             </View>
           ) : (
-            todayTasks.map(renderTaskCard)
+            <View style={styles.tasksList}>
+              {todayTasks.map(task => renderTaskCard(task))}
+            </View>
           )}
         </View>
       </Animated.ScrollView>
@@ -236,7 +446,17 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalScrollView}>
-              {tasks.map(renderTaskCard)}
+              {tasks.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={[styles.emptyStateText, { color: isDark ? colors.text.light : colors.text.secondary }]}>
+                    No tasks available
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.tasksList}>
+                  {tasks.map(task => renderTaskCard(task))}
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -247,7 +467,7 @@ export default function HomeScreen() {
         onPress={() => setIsAddModalVisible(true)}
       >
         <LinearGradient
-          colors={gradients.primary}
+          colors={[gradients.primary[0], gradients.primary[1]]}
           style={styles.addButtonGradient}
         >
           <Plus size={24} color="#fff" />
@@ -289,6 +509,15 @@ function getPriorityTextColor(priority: 'high' | 'medium' | 'low'): string {
   }
 }
 
+function getProgressColor(progress: number): string {
+  if (progress < 30) return colors.danger;
+  if (progress < 70) return colors.warning;
+  return colors.success;
+}
+
+const { width } = Dimensions.get('window');
+const dateItemWidth = (width - 40) / 5; // Show 5 dates with padding
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -326,6 +555,7 @@ const styles = StyleSheet.create({
   progressCard: {
     borderRadius: 16,
     padding: 20,
+    overflow: 'hidden',
   },
   progressHeader: {
     flexDirection: 'row',
@@ -333,23 +563,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  progressBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
   },
   progressPercentage: {
-    fontSize: 24,
+    fontSize: 16,
     fontWeight: '700',
   },
   progressBarContainer: {
     height: 8,
-    backgroundColor: 'rgba(0,0,0,0.1)',
     borderRadius: 4,
     marginBottom: 20,
+    position: 'relative',
+  },
+  progressBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 4,
   },
   progressBar: {
     height: '100%',
-    backgroundColor: colors.primary,
     borderRadius: 4,
   },
   statsContainer: {
@@ -358,6 +601,10 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    width: '30%',
   },
   statValue: {
     fontSize: 20,
@@ -368,14 +615,71 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  tasksSection: {
-    padding: 20,
+  calendarSection: {
+    marginTop: 20,
+    paddingHorizontal: 20,
   },
-  sectionHeader: {
+  sectionHeaderWithIcon: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  weeklyCalendarContainer: {
+    paddingVertical: 10,
+  },
+  dateContainer: {
+    width: dateItemWidth,
+    height: 100,
+    marginRight: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  dateGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+  },
+  todayContainer: {
+    borderWidth: 2,
+    borderColor: colors.accent,
+  },
+  selectedDateContainer: {
+    transform: [{ scale: 1.05 }],
+    elevation: 8,
+  },
+  dayName: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  dayNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  monthLabel: {
+    fontSize: 12,
+    opacity: 0.8,
+  },
+  taskIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  taskCount: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tasksSection: {
+    padding: 20,
+    marginTop: 15,
   },
   viewAllButton: {
     flexDirection: 'row',
@@ -394,26 +698,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   taskCard: {
-    marginBottom: 12,
-    borderRadius: 12,
+    marginBottom: 16,
+    borderRadius: 16,
     overflow: 'hidden',
   },
   taskCardContent: {
+    padding: 3,
+    borderRadius: 16,
+  },
+  taskCardInner: {
+    padding: 16,
+    borderRadius: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  taskCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    flex: 1,
   },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxCompleted: {
-    backgroundColor: colors.primary,
+  checkboxContainer: {
+    marginRight: 14,
   },
   taskInfo: {
     flex: 1,
@@ -421,27 +727,58 @@ const styles = StyleSheet.create({
   taskTitle: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 8,
+    // Add this to ensure text doesn't overflow
+    flexShrink: 1,
   },
   completedTask: {
     textDecorationLine: 'line-through',
     opacity: 0.7,
+    color: colors.success,
+  },
+  taskMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  subjectContainer: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginRight: 8,
+    marginBottom: 4,
   },
   taskSubject: {
-    fontSize: 14,
-    opacity: 0.8,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  timeIcon: {
+    marginRight: 4,
+  },
+  taskDeadline: {
+    fontSize: 12,
+    color: colors.accent,
+    fontWeight: '600',
   },
   priorityContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 12,
-    marginLeft: 8,
   },
   priorityText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     marginLeft: 4,
   },
   addButton: {
@@ -482,5 +819,8 @@ const styles = StyleSheet.create({
   },
   modalScrollView: {
     flex: 1,
+  },
+  tasksList: {
+    paddingTop: 8,
   },
 });

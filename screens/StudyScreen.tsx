@@ -39,7 +39,9 @@ export default function StudyScreen() {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isCreatingDeck, setIsCreatingDeck] = useState(false);
   const [isAddingCard, setIsAddingCard] = useState(false);
-  const [studyMode, setStudyMode] = useState<'learn' | 'review' | 'test'>('learn');
+  const [isEditingCard, setIsEditingCard] = useState(false);
+  const [editCardId, setEditCardId] = useState<string | null>(null);
+  const [studyMode, setStudyMode] = useState<'learn' | 'test'>('learn');
   const [studyProgress, setStudyProgress] = useState({
     correct: 0,
     incorrect: 0,
@@ -54,6 +56,7 @@ export default function StudyScreen() {
   const [newCardCategory, setNewCardCategory] = useState('');
   const [newCardDifficulty, setNewCardDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [newCardTags, setNewCardTags] = useState<string[]>([]);
+  const [newCardOptions, setNewCardOptions] = useState<string[]>(['', '', '', '']);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAnswer, setShowAnswer] = useState(false);
@@ -88,7 +91,13 @@ export default function StudyScreen() {
             difficulty: 'medium',
             lastReviewed: null,
             mastery: 0,
-            tags: ['formula', 'quadratic', 'algebra']
+            tags: ['formula', 'quadratic', 'algebra'],
+            options: [
+              'x = (-b ± √(b² - 4ac)) / 2a',
+              'x = (-b ± √(b² + 4ac)) / 2a',
+              'x = (-b ± √(b² - 4ac)) / 2',
+              'x = (b ± √(b² - 4ac)) / 2a'
+            ]
           },
           {
             id: '2',
@@ -98,7 +107,13 @@ export default function StudyScreen() {
             difficulty: 'easy',
             lastReviewed: null,
             mastery: 0,
-            tags: ['theorem', 'geometry', 'triangle']
+            tags: ['theorem', 'geometry', 'triangle'],
+            options: [
+              'a² + b² = c²',
+              'a² - b² = c²',
+              'a² + b² + c² = 0',
+              'a + b + c = 180°'
+            ]
           }
         ],
         createdAt: new Date(),
@@ -159,7 +174,7 @@ export default function StudyScreen() {
       const newDeck: Deck = {
         id: Date.now().toString(),
         title: newDeckTitle,
-        description: newDeckDescription,
+        description: newDeckDescription || 'No description',
         cards: [],
         createdAt: new Date(),
         lastStudied: null,
@@ -171,34 +186,178 @@ export default function StudyScreen() {
       setNewDeckTitle('');
       setNewDeckDescription('');
       setIsCreatingDeck(false);
+      
+      // Auto-select the new deck
+      setCurrentDeck(newDeck);
+    }
+  };
+
+  const deleteDeck = (deckId: string) => {
+    setDecks(decks.filter(deck => deck.id !== deckId));
+    if (currentDeck && currentDeck.id === deckId) {
+      setCurrentDeck(null);
     }
   };
 
   const addCard = () => {
     if (currentDeck && newCardQuestion.trim() && newCardAnswer.trim()) {
+      // Filter out empty options
+      const filteredOptions = studyMode === 'test' 
+        ? [newCardAnswer, ...newCardOptions.filter(opt => opt.trim() !== '' && opt.trim() !== newCardAnswer.trim())]
+        : [newCardAnswer];
+
+      // If we don't have 4 options, generate some dummy ones
+      const finalOptions = filteredOptions.length >= 4 
+        ? filteredOptions.slice(0, 4) 
+        : [...filteredOptions, ...Array(4 - filteredOptions.length).fill('').map((_, i) => `Option ${i + 1}`)];
+        
+      // Shuffle the options
+      const shuffledOptions = [...finalOptions].sort(() => Math.random() - 0.5);
+
       const newCard: Flashcard = {
         id: Date.now().toString(),
         question: newCardQuestion,
         answer: newCardAnswer,
-        category: newCardCategory,
+        category: newCardCategory || 'General',
         difficulty: newCardDifficulty,
         lastReviewed: null,
         mastery: 0,
-        tags: newCardTags
+        tags: newCardTags.length > 0 ? newCardTags : ['general'],
+        options: shuffledOptions
       };
+      
       const updatedDeck = {
         ...currentDeck,
         cards: [...currentDeck.cards, newCard]
       };
+      
       setDecks(decks.map(d => d.id === currentDeck.id ? updatedDeck : d));
       setCurrentDeck(updatedDeck);
-      setNewCardQuestion('');
-      setNewCardAnswer('');
-      setNewCardCategory('');
-      setNewCardDifficulty('medium');
-      setNewCardTags([]);
+      resetCardForm();
       setIsAddingCard(false);
     }
+  };
+
+  const editCard = () => {
+    if (currentDeck && editCardId && newCardQuestion.trim() && newCardAnswer.trim()) {
+      const filteredOptions = studyMode === 'test' 
+        ? [newCardAnswer, ...newCardOptions.filter(opt => opt.trim() !== '' && opt.trim() !== newCardAnswer.trim())]
+        : [newCardAnswer];
+
+      const finalOptions = filteredOptions.length >= 4 
+        ? filteredOptions.slice(0, 4) 
+        : [...filteredOptions, ...Array(4 - filteredOptions.length).fill('').map((_, i) => `Option ${i + 1}`)];
+      
+      const shuffledOptions = [...finalOptions].sort(() => Math.random() - 0.5);
+
+      const updatedCards = currentDeck.cards.map(card => {
+        if (card.id === editCardId) {
+          return {
+            ...card,
+            question: newCardQuestion,
+            answer: newCardAnswer,
+            category: newCardCategory || card.category,
+            difficulty: newCardDifficulty,
+            tags: newCardTags.length > 0 ? newCardTags : card.tags,
+            options: shuffledOptions
+          };
+        }
+        return card;
+      });
+      
+      const updatedDeck = {
+        ...currentDeck,
+        cards: updatedCards
+      };
+      
+      setDecks(decks.map(d => d.id === currentDeck.id ? updatedDeck : d));
+      setCurrentDeck(updatedDeck);
+      resetCardForm();
+      setIsEditingCard(false);
+      setEditCardId(null);
+    }
+  };
+
+  const deleteCard = (cardId: string) => {
+    if (currentDeck) {
+      const updatedCards = currentDeck.cards.filter(card => card.id !== cardId);
+      const updatedDeck = {
+        ...currentDeck,
+        cards: updatedCards
+      };
+      
+      setDecks(decks.map(d => d.id === currentDeck.id ? updatedDeck : d));
+      setCurrentDeck(updatedDeck);
+      
+      // If we're deleting the current card, adjust the index
+      if (currentCardIndex >= updatedCards.length) {
+        setCurrentCardIndex(Math.max(0, updatedCards.length - 1));
+      }
+    }
+  };
+
+  const resetCardForm = () => {
+    setNewCardQuestion('');
+    setNewCardAnswer('');
+    setNewCardCategory('');
+    setNewCardDifficulty('medium');
+    setNewCardTags([]);
+    setNewCardOptions(['', '', '', '']);
+  };
+
+  const startEditingCard = (card: Flashcard) => {
+    setEditCardId(card.id);
+    setNewCardQuestion(card.question);
+    setNewCardAnswer(card.answer);
+    setNewCardCategory(card.category);
+    setNewCardDifficulty(card.difficulty);
+    setNewCardTags([...card.tags]);
+    
+    // Set options, ensuring we have exactly 4
+    if (card.options && card.options.length > 0) {
+      // Filter out the correct answer
+      const otherOptions = card.options.filter(opt => opt !== card.answer);
+      // Create an array with the correct answer and up to 3 other options
+      const optionsToSet = [...otherOptions.slice(0, 3)];
+      // Pad with empty strings if needed
+      while (optionsToSet.length < 3) {
+        optionsToSet.push('');
+      }
+      setNewCardOptions(optionsToSet);
+    } else {
+      setNewCardOptions(['', '', '', '']);
+    }
+    
+    setIsEditingCard(true);
+  };
+
+  // Card options input component for test mode
+  const renderCardOptionsInputs = () => {
+    if (studyMode !== 'test') return null;
+
+    return (
+      <View style={styles.optionsInputContainer}>
+        <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>
+          Multiple Choice Options (correct answer will be added automatically)
+        </Text>
+        {newCardOptions.slice(0, 3).map((option, index) => (
+          <View key={index} style={styles.optionInputRow}>
+            <Text style={styles.optionLabel}>{String.fromCharCode(66 + index)}.</Text>
+            <TextInput
+              style={[styles.optionInput, { color: isDark ? colors.text.light : colors.text.primary }]}
+              placeholder={`Option ${index + 2}`}
+              placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+              value={option}
+              onChangeText={(text) => {
+                const newOptions = [...newCardOptions];
+                newOptions[index] = text;
+                setNewCardOptions(newOptions);
+              }}
+            />
+          </View>
+        ))}
+      </View>
+    );
   };
 
   const rateCard = (rating: 'correct' | 'incorrect') => {
@@ -315,7 +474,13 @@ export default function StudyScreen() {
     <TouchableOpacity
       key={deck.id}
       style={[styles.deckCard, { backgroundColor: isDark ? colors.background.cardDark : colors.background.card }]}
-      onPress={() => setCurrentDeck(deck)}
+      onPress={() => {
+        setCurrentDeck(deck);
+        setCurrentCardIndex(0);
+        setShowAnswer(false);
+        setSelectedOption(null);
+        setTestResults({ correct: 0, total: 0, currentQuestion: 0 });
+      }}
     >
       <View style={styles.deckHeader}>
         <View style={styles.deckTitleContainer}>
@@ -353,10 +518,14 @@ export default function StudyScreen() {
           >
             <Plus size={20} color={isDark ? colors.text.light : colors.text.primary} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Edit2 size={20} color={isDark ? colors.text.light : colors.text.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => {
+              if (confirm('Are you sure you want to delete this deck?')) {
+                deleteDeck(deck.id);
+              }
+            }}
+          >
             <Trash2 size={20} color={colors.danger} />
           </TouchableOpacity>
         </View>
@@ -377,7 +546,27 @@ export default function StudyScreen() {
   );
 
   const renderStudyCard = () => {
-    if (!currentDeck || !currentDeck.cards[currentCardIndex]) return null;
+    if (!currentDeck || !currentDeck.cards.length) {
+      return (
+        <View style={styles.emptyStateContainer}>
+          <Text style={[styles.emptyStateText, { color: isDark ? colors.text.light : colors.text.primary }]}>
+            No cards in this deck
+          </Text>
+          <TouchableOpacity 
+            style={[styles.emptyStateButton, { backgroundColor: colors.primary }]}
+            onPress={() => setIsAddingCard(true)}
+          >
+            <Text style={styles.emptyStateButtonText}>Add a Card</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.emptyStateButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary }]}
+            onPress={() => setCurrentDeck(null)}
+          >
+            <Text style={[styles.emptyStateButtonText, { color: colors.primary }]}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
 
     const currentCard = currentDeck.cards[currentCardIndex];
     const progress = (currentCardIndex + 1) / currentDeck.cards.length;
@@ -388,18 +577,22 @@ export default function StudyScreen() {
         <View style={styles.headerBar}>
           <TouchableOpacity
             style={styles.exitButton}
-            onPress={exitStudy}
+            onPress={() => {
+              setCurrentDeck(null);
+              setCurrentCardIndex(0);
+              setShowAnswer(false);
+              setSelectedOption(null);
+              setTestResults({ correct: 0, total: 0, currentQuestion: 0 });
+            }}
           >
             <X size={24} color={isDark ? colors.text.light : colors.text.primary} />
           </TouchableOpacity>
           <Text style={[styles.deckTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
             {currentDeck.title}
           </Text>
-          <View style={styles.progressText}>
-            <Text style={[styles.progressText, { color: isDark ? colors.text.light : colors.text.secondary }]}>
-              {currentCardIndex + 1}/{currentDeck.cards.length}
-            </Text>
-          </View>
+          <Text style={[styles.progressText, { color: isDark ? colors.text.light : colors.text.secondary }]}>
+            {currentCardIndex + 1}/{currentDeck.cards.length}
+          </Text>
         </View>
 
         <View style={styles.progressBar}>
@@ -419,11 +612,23 @@ export default function StudyScreen() {
                   </Text>
                 </View>
               </View>
-              <View style={styles.masteryBadge}>
-                <Star size={16} color={colors.primary} />
-                <Text style={[styles.masteryText, { color: colors.primary }]}>
-                  {currentCard.mastery}%
-                </Text>
+              <View style={styles.cardActions}>
+                <TouchableOpacity 
+                  style={styles.cardAction}
+                  onPress={() => startEditingCard(currentCard)}
+                >
+                  <Edit2 size={18} color={isDark ? colors.text.light : colors.text.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.cardAction}
+                  onPress={() => {
+                    if (confirm('Are you sure you want to delete this card?')) {
+                      deleteCard(currentCard.id);
+                    }
+                  }}
+                >
+                  <Trash2 size={18} color={colors.danger} />
+                </TouchableOpacity>
               </View>
             </View>
             
@@ -433,27 +638,31 @@ export default function StudyScreen() {
 
             {studyMode === 'test' ? (
               <View style={styles.optionsContainer}>
-                {currentCard.options?.map((option, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[
-                      styles.optionButton,
-                      selectedOption === option && styles.selectedOption,
-                      selectedOption && option === currentCard.answer && styles.correctOption,
-                      selectedOption && option !== currentCard.answer && selectedOption === option && styles.incorrectOption
-                    ]}
-                    onPress={() => !selectedOption && handleTestAnswer(option)}
-                    disabled={!!selectedOption}
-                  >
-                    <Text style={[
-                      styles.optionText,
-                      selectedOption === option && styles.selectedOptionText,
-                      selectedOption && option === currentCard.answer && styles.correctOptionText
-                    ]}>
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {currentCard.options?.map((option, index) => {
+                  const optionLetter = String.fromCharCode(65 + index); // A, B, C, D
+                  return (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.optionButton,
+                        selectedOption === option && styles.selectedOption,
+                        selectedOption && option === currentCard.answer && styles.correctOption,
+                        selectedOption && option !== currentCard.answer && selectedOption === option && styles.incorrectOption
+                      ]}
+                      onPress={() => !selectedOption && handleTestAnswer(option)}
+                      disabled={!!selectedOption}
+                    >
+                      <Text style={styles.optionLetter}>{optionLetter}</Text>
+                      <Text style={[
+                        styles.optionText,
+                        selectedOption === option && styles.selectedOptionText,
+                        selectedOption && option === currentCard.answer && styles.correctOptionText
+                      ]}>
+                        {option}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             ) : (
               <>
@@ -568,58 +777,54 @@ export default function StudyScreen() {
     );
   };
 
+  const modeSelector = (
+    <View style={styles.modeSelector}>
+      <TouchableOpacity
+        style={[styles.modeButton, studyMode === 'learn' && styles.activeModeButton]}
+        onPress={() => {
+          setStudyMode('learn');
+          if (currentDeck) {
+            setShowAnswer(false);
+            setCurrentCardIndex(0);
+          }
+        }}
+      >
+        <Text style={[styles.modeText, studyMode === 'learn' && styles.activeModeText]}>
+          Learn
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.modeButton, studyMode === 'test' && styles.activeModeButton]}
+        onPress={() => {
+          setStudyMode('test');
+          if (currentDeck) {
+            setSelectedOption(null);
+            setCurrentCardIndex(0);
+            setTestResults({ correct: 0, total: 0, currentQuestion: 0 });
+          }
+        }}
+      >
+        <Text style={[styles.modeText, studyMode === 'test' && styles.activeModeText]}>
+          Test
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: isDark ? colors.background.dark : colors.background.light }]}>
       <LinearGradient
-        colors={isDark ? gradients.background.dark : gradients.background.light}
+        colors={[
+          (isDark ? gradients.background.dark : gradients.background.light)[0],
+          (isDark ? gradients.background.dark : gradients.background.light)[1]
+        ]}
         style={styles.header}
       >
         <View style={styles.headerContent}>
           <Text style={[styles.headerTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
             Study
           </Text>
-          <View style={styles.modeSelector}>
-            <TouchableOpacity
-              style={[styles.modeButton, studyMode === 'learn' && styles.activeModeButton]}
-              onPress={() => {
-                setStudyMode('learn');
-                setCurrentDeck(null);
-                setCurrentCardIndex(0);
-                setShowAnswer(false);
-              }}
-            >
-              <Text style={[styles.modeText, studyMode === 'learn' && styles.activeModeText]}>
-                Learn
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, studyMode === 'review' && styles.activeModeButton]}
-              onPress={() => {
-                setStudyMode('review');
-                setCurrentDeck(null);
-                setCurrentCardIndex(0);
-                setShowAnswer(false);
-              }}
-            >
-              <Text style={[styles.modeText, studyMode === 'review' && styles.activeModeText]}>
-                Review
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, studyMode === 'test' && styles.activeModeButton]}
-              onPress={() => {
-                setStudyMode('test');
-                setCurrentDeck(null);
-                setCurrentCardIndex(0);
-                setSelectedOption(null);
-                setTestResults({ correct: 0, total: 0, currentQuestion: 0 });
-              }}
-            >
-              <Text style={[styles.modeText, studyMode === 'test' && styles.activeModeText]}>
-                Test
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {modeSelector}
         </View>
       </LinearGradient>
 
@@ -637,14 +842,28 @@ export default function StudyScreen() {
                 onChangeText={setSearchQuery}
               />
             </View>
-            {filteredDecks.map(renderDeckCard)}
+            {decks.length === 0 ? (
+              <View style={styles.emptyStateContainer}>
+                <Text style={[styles.emptyStateText, { color: isDark ? colors.text.light : colors.text.primary }]}>
+                  You don't have any decks yet
+                </Text>
+                <TouchableOpacity 
+                  style={[styles.emptyStateButton, { backgroundColor: colors.primary }]}
+                  onPress={() => setIsCreatingDeck(true)}
+                >
+                  <Text style={styles.emptyStateButtonText}>Create Your First Deck</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              decks.map(renderDeckCard)
+            )}
           </ScrollView>
           <TouchableOpacity
             style={[styles.addButton, shadows.large]}
             onPress={() => setIsCreatingDeck(true)}
           >
             <LinearGradient
-              colors={gradients.primary}
+              colors={[gradients.primary[0], gradients.primary[1]]}
               style={styles.addButtonGradient}
             >
               <Plus size={24} color="#fff" />
@@ -669,16 +888,18 @@ export default function StudyScreen() {
                 <X size={24} color={isDark ? colors.text.light : colors.text.primary} />
               </TouchableOpacity>
             </View>
+            <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Deck Title</Text>
             <TextInput
               style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
-              placeholder="Deck Title"
+              placeholder="Enter a title for your deck"
               placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
               value={newDeckTitle}
               onChangeText={setNewDeckTitle}
             />
+            <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Description</Text>
             <TextInput
               style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
-              placeholder="Description"
+              placeholder="Enter a description (optional)"
               placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
               value={newDeckDescription}
               onChangeText={setNewDeckDescription}
@@ -706,58 +927,163 @@ export default function StudyScreen() {
               <Text style={[styles.modalTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
                 Add New Card
               </Text>
-              <TouchableOpacity onPress={() => setIsAddingCard(false)}>
+              <TouchableOpacity onPress={() => {
+                resetCardForm();
+                setIsAddingCard(false);
+              }}>
                 <X size={24} color={isDark ? colors.text.light : colors.text.primary} />
               </TouchableOpacity>
             </View>
-            <TextInput
-              style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
-              placeholder="Question"
-              placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
-              value={newCardQuestion}
-              onChangeText={setNewCardQuestion}
-              multiline
-            />
-            <TextInput
-              style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
-              placeholder="Answer"
-              placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
-              value={newCardAnswer}
-              onChangeText={setNewCardAnswer}
-              multiline
-            />
-            <TextInput
-              style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
-              placeholder="Category"
-              placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
-              value={newCardCategory}
-              onChangeText={setNewCardCategory}
-            />
-            <View style={styles.difficultySelector}>
-              {(['easy', 'medium', 'hard'] as const).map(difficulty => (
-                <TouchableOpacity
-                  key={difficulty}
-                  style={[
-                    styles.difficultyButton,
-                    newCardDifficulty === difficulty && styles.activeDifficultyButton
-                  ]}
-                  onPress={() => setNewCardDifficulty(difficulty)}
-                >
-                  <Text style={[
-                    styles.difficultyText,
-                    newCardDifficulty === difficulty && styles.activeDifficultyText
-                  ]}>
-                    {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <ScrollView style={styles.modalScrollView}>
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Question</Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Enter your question"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardQuestion}
+                onChangeText={setNewCardQuestion}
+                multiline
+              />
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>
+                {studyMode === 'test' ? 'Correct Answer (Option A)' : 'Answer'}
+              </Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Enter the answer"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardAnswer}
+                onChangeText={setNewCardAnswer}
+                multiline
+              />
+              
+              {renderCardOptionsInputs()}
+              
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Category</Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Category (optional)"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardCategory}
+                onChangeText={setNewCardCategory}
+              />
+              
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Difficulty</Text>
+              <View style={styles.difficultySelector}>
+                {(['easy', 'medium', 'hard'] as const).map(difficulty => (
+                  <TouchableOpacity
+                    key={difficulty}
+                    style={[
+                      styles.difficultyButton,
+                      newCardDifficulty === difficulty && styles.activeDifficultyButton
+                    ]}
+                    onPress={() => setNewCardDifficulty(difficulty)}
+                  >
+                    <Text style={[
+                      styles.difficultyButtonText,
+                      newCardDifficulty === difficulty && styles.activeDifficultyButtonText
+                    ]}>
+                      {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              <TouchableOpacity
+                style={[styles.submitButton, { backgroundColor: colors.primary }]}
+                onPress={addCard}
+              >
+                <Text style={styles.submitButtonText}>Add Card</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isEditingCard}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          resetCardForm();
+          setIsEditingCard(false);
+          setEditCardId(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: isDark ? colors.background.dark : colors.background.light }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: isDark ? colors.text.light : colors.text.primary }]}>
+                Edit Card
+              </Text>
+              <TouchableOpacity onPress={() => {
+                resetCardForm();
+                setIsEditingCard(false);
+                setEditCardId(null);
+              }}>
+                <X size={24} color={isDark ? colors.text.light : colors.text.primary} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.submitButton, { backgroundColor: colors.primary }]}
-              onPress={addCard}
-            >
-              <Text style={styles.submitButtonText}>Add Card</Text>
-            </TouchableOpacity>
+            <ScrollView style={styles.modalScrollView}>
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Question</Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Enter your question"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardQuestion}
+                onChangeText={setNewCardQuestion}
+                multiline
+              />
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>
+                {studyMode === 'test' ? 'Correct Answer (Option A)' : 'Answer'}
+              </Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Enter the answer"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardAnswer}
+                onChangeText={setNewCardAnswer}
+                multiline
+              />
+              
+              {renderCardOptionsInputs()}
+              
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Category</Text>
+              <TextInput
+                style={[styles.input, { color: isDark ? colors.text.light : colors.text.primary }]}
+                placeholder="Category (optional)"
+                placeholderTextColor={isDark ? colors.text.light : colors.text.secondary}
+                value={newCardCategory}
+                onChangeText={setNewCardCategory}
+              />
+              
+              <Text style={[styles.inputLabel, { color: isDark ? colors.text.light : colors.text.primary }]}>Difficulty</Text>
+              <View style={styles.difficultySelector}>
+                {(['easy', 'medium', 'hard'] as const).map(difficulty => (
+                  <TouchableOpacity
+                    key={difficulty}
+                    style={[
+                      styles.difficultyButton,
+                      newCardDifficulty === difficulty && styles.activeDifficultyButton
+                    ]}
+                    onPress={() => setNewCardDifficulty(difficulty)}
+                  >
+                    <Text style={[
+                      styles.difficultyButtonText,
+                      newCardDifficulty === difficulty && styles.activeDifficultyButtonText
+                    ]}>
+                      {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              <TouchableOpacity
+                style={[styles.submitButton, { backgroundColor: colors.primary }]}
+                onPress={editCard}
+              >
+                <Text style={styles.submitButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -960,14 +1286,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  masteryBadge: {
+  cardActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    gap: 8,
   },
-  masteryText: {
-    fontSize: 14,
-    fontWeight: '600',
+  cardAction: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   cardText: {
     fontSize: 20,
@@ -979,9 +1308,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 16,
     borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  optionLetter: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginRight: 10,
+    width: 20,
+    textAlign: 'center',
+    color: colors.primary,
   },
   selectedOption: {
     backgroundColor: colors.primary,
@@ -993,8 +1332,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger,
   },
   optionText: {
+    flex: 1,
     fontSize: 16,
-    textAlign: 'center',
     color: colors.text.primary,
   },
   selectedOptionText: {
@@ -1024,14 +1363,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  testStats: {
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  testStatText: {
-    fontSize: 18,
-    fontWeight: '600',
   },
   controls: {
     flexDirection: 'row',
@@ -1069,12 +1400,40 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
   input: {
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.1)',
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
+    fontSize: 16,
+  },
+  optionsInputContainer: {
+    marginBottom: 16,
+  },
+  optionInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  optionLabel: {
+    width: 20,
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginRight: 8,
+    color: colors.primary,
+  },
+  optionInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 12,
+    padding: 12,
     fontSize: 16,
   },
   difficultySelector: {
@@ -1093,17 +1452,19 @@ const styles = StyleSheet.create({
   activeDifficultyButton: {
     backgroundColor: colors.primary,
   },
-  difficultyText: {
+  difficultyButtonText: {
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
+    color: colors.text.primary,
   },
-  activeDifficultyText: {
+  activeDifficultyButtonText: {
     color: '#fff',
   },
   submitButton: {
     paddingVertical: 12,
     borderRadius: 12,
+    marginTop: 8,
   },
   submitButtonText: {
     color: '#fff',
@@ -1165,9 +1526,12 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   testStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 16,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  testStatText: {
+    fontSize: 18,
+    fontWeight: '600',
   },
   testStatItem: {
     alignItems: 'center',
@@ -1179,5 +1543,32 @@ const styles = StyleSheet.create({
   testStatValue: {
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  emptyStateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  emptyStateText: {
+    fontSize: 18,
+    fontWeight: '500',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  emptyStateButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: 12,
+    width: '100%',
+    maxWidth: 300,
+  },
+  emptyStateButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 }); 

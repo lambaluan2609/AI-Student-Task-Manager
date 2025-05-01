@@ -1,18 +1,25 @@
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { Toaster } from 'sonner-native';
-import { Home, Calendar, BookOpen, Trophy } from 'lucide-react-native';
+import { Home, Calendar, BookOpen, User } from 'lucide-react-native';
 import { useColorScheme } from 'react-native';
+import { useAuth } from './services/AuthContext';
+import { AuthProvider } from './services/AuthContext';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-// Import screens (we'll create these next)
+// Import screens
 import HomeScreen from "./screens/HomeScreen";
 import CalendarScreen from "./screens/CalendarScreen";
 import StudyScreen from "./screens/StudyScreen";
-import RewardsScreen from "./screens/RewardsScreen";
+import ProfileScreen from "./screens/ProfileScreen";
+import LoginScreen from "./screens/LoginScreen";
 
 const Tab = createBottomTabNavigator();
+const Stack = createNativeStackNavigator();
 
 function TabNavigator() {
   const colorScheme = useColorScheme();
@@ -52,24 +59,47 @@ function TabNavigator() {
         }}
       />
       <Tab.Screen
-        name="Rewards"
-        component={RewardsScreen}
+        name="Profile"
+        component={ProfileScreen}
         options={{
-          tabBarIcon: ({ color, size }) => <Trophy color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
     </Tab.Navigator>
   );
 }
 
+function AppNavigator() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    // You could show a splash screen here
+    return null;
+  }
+
+  return (
+    <NavigationContainer>
+      {user ? (
+        <TabNavigator />
+      ) : (
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+        </Stack.Navigator>
+      )}
+    </NavigationContainer>
+  );
+}
+
 export default function App() {
   return (
-    <SafeAreaProvider style={styles.container}>
-      <Toaster />
-      <NavigationContainer>
-        <TabNavigator />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider style={styles.container}>
+        <AuthProvider>
+          <Toaster />
+          <AppNavigator />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
